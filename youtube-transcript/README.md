@@ -39,6 +39,20 @@ Invoke via any Claude Code-compatible agent:
 
 Or just paste a YouTube URL and the skill will trigger automatically.
 
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--metadata-only` | Print video metadata to stdout only; skip transcript download. No file is written. |
+| `--output <name>` | Custom filename base (full mode only). |
+| `--no-date` | Suppress date prefix on output filename (full mode only). |
+
+**Example — metadata only**:
+
+```
+https://www.youtube.com/watch?v=VIDEO_ID --metadata-only
+```
+
 ## Supported agents
 
 Claude Code, Copilot CLI, Codex, Gemini CLI, Hermes. See `references/tool-map.md` for per-platform tool name differences.

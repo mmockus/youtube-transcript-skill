@@ -1,16 +1,33 @@
 ---
 name: youtube-transcript
-description: Download a YouTube video transcript as a formatted Markdown file with metadata header, timestamped transcript, and chapter table. Use whenever a user provides a YouTube URL and wants the transcript saved, downloaded, or exported as Markdown. Also triggers on "get the transcript for", "save this video as markdown", "download transcript", "transcript with timestamps", "export YouTube transcript". If the user pastes a YouTube URL with no further instruction, this skill likely applies.
+description: Download a YouTube video transcript as a formatted Markdown file with metadata header, timestamped transcript, and chapter table. Use whenever a user provides a YouTube URL and wants the transcript saved, downloaded, or exported as Markdown. Also triggers on "get the transcript for", "save this video as markdown", "download transcript", "transcript with timestamps", "export YouTube transcript". If the user pastes a YouTube URL with no further instruction, this skill likely applies. Also triggers on "--metadata-only", "metadata only", "just the metadata", "video info only".
 ---
 
 # YouTube Transcript
 
-Fetch a YouTube video's metadata and transcript, then write a formatted Markdown file to the current working directory.
+Fetch a YouTube video's metadata and transcript, then write a formatted Markdown file to the current working directory. Pass `--metadata-only` to print only the video metadata to stdout without downloading a transcript.
 
 ## Requirements
 
 - `yt-dlp` on PATH
 - Python 3.11+
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--metadata-only` | Print video metadata to stdout only; skip transcript download. No file is written. |
+| `--output <name>` | Use `<name>` as the output filename base (full mode only). |
+| `--no-date` | Suppress the `YYYY-MM-DD-` date prefix on the output filename (full mode only). |
+
+**Flag conflict**: If both `--metadata-only` and `--output` are present, stop immediately and output:
+> `--metadata-only and --output cannot be combined: metadata-only mode writes to stdout only.`
+
+**`--no-date` with `--metadata-only`**: `--no-date` is silently ignored — no file is written regardless.
+
+---
+
+**Before starting the workflow**: Check for `--metadata-only`. If present, skip to **Metadata-Only Mode** below.
 
 ## Workflow
 
@@ -29,34 +46,24 @@ Extract from the JSON output:
 - `description` — full text (parse chapters from here)
 - `webpage_url` — canonical URL
 
-### 2. Fetch transcript VTT
+### 2. Extract VTT URL and parse transcript in memory
+
+From the JSON fetched in step 1, extract the VTT URL:
+- Check `automatic_captions.en` first; use the entry whose `ext` is `vtt`
+- If no English entry, fall back to the first available language in `automatic_captions`
+- If `automatic_captions` is empty, captions are disabled — see Error Handling
+
+Fetch and parse in a single pipeline (no file written to disk):
 
 ```bash
-yt-dlp \
-  --write-auto-sub \
-  --sub-lang en \
-  --sub-format vtt \
-  --skip-download \
-  --ignore-no-formats-error \
-  -o /tmp/yt-transcript \
-  "VIDEO_URL"
+curl -sL "VTT_URL" | uv run python ~/.claude/skills/youtube-transcript/scripts/vtt_to_md.py -
 ```
 
-If no English sub is found, retry without `--sub-lang en` to accept any language. Glob `/tmp/yt-transcript*.vtt` to find the output file.
-
-### 3. Parse the VTT into timestamped lines
-
-```bash
-python3 ~/.claude/skills/youtube-transcript/scripts/vtt_to_md.py /tmp/yt-transcript.en.vtt
-```
-
-Adjust the filename to match whatever the glob found.
-
-### 4. Read the output template
+### 3. Read the output template
 
 Read `~/.claude/skills/youtube-transcript/assets/transcript-template.md` and replace every `{{PLACEHOLDER}}` with the fetched values.
 
-### 5. Write the output file
+### 4. Write the output file
 
 Determine the filename using the rules below, then write to the **current working directory**.
 
@@ -105,6 +112,56 @@ If no chapters are present, omit the chapters section entirely rather than leavi
 
 - VTT unavailable (captions disabled): write the file with the transcript section replaced by `> Transcript unavailable — captions are disabled for this video.`
 - Metadata fetch fails: relay the yt-dlp error to the user and stop.
+
+---
+
+## Metadata-Only Mode
+
+Activated when `--metadata-only` is passed. Skips transcript download and file writing entirely.
+
+### 1. Fetch metadata
+
+Same command as the full workflow:
+
+```bash
+yt-dlp --dump-json --no-playlist "VIDEO_URL"
+```
+
+If this fails, relay the yt-dlp error to the user and stop. (Captions-disabled videos are fine — no VTT fetch is attempted.)
+
+### 2. Print to stdout
+
+Render and print the following Markdown to stdout — do **not** write a file:
+
+```
+# {title}
+
+## Video Metadata
+
+| Field | Value |
+|-------|-------|
+| **Channel** | {channel} |
+| **Published** | {upload_date} |
+| **Duration** | {duration} |
+| **Views** | {view_count} |
+| **URL** | {webpage_url} |
+
+## Description
+
+{description}
+```
+
+If chapters are found in `description` (lines matching `H:MM` or `M:SS` followed by label text), append:
+
+```
+### Chapters
+
+| Timestamp | Topic |
+|-----------|-------|
+| {ts}      | {label} |
+```
+
+Omit the Chapters section entirely if no chapters are present.
 
 ---
 
